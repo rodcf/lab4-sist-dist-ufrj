@@ -12,13 +12,13 @@ from json.decoder import JSONDecodeError
 HOST = 'localhost' # maquina onde esta o servidor
 PORT = 5000        # porta que o servidor esta escutando
 
-ADDRESS = (HOST, PORT)
+ADDRESS = (HOST, PORT) # tupla contendo o IP e a porta do servidor
 
 HEADER_LENGTH = 4 # tamanho do header utilizado para enviar o tamanho em bytes da mensagem
 
 FORMAT = 'utf-8' # formato utilizado para codificar/decodificar as mensagens
 
-online_users = {} # dicionário de usuários ativos na sala de bate-papo
+online_users = {} # dicionário de usuários ativos na sala de bate-papo (endereço e nome de usuário)
 
 # cria socket
 clientSocket = socket.socket()
@@ -44,13 +44,17 @@ def recvall(connectionSocket, numBytes):
 # Função para receber a mensagem completa de acordo com o tamanho em bytes enviado no header
 def receiveMessage(connectionSocket):
 
+    # recebe o trecho da mensagem relativo ao tamanho da mensagem
     header = recvall(connectionSocket, HEADER_LENGTH)
 
+    # se mensagem recebida for vazia, retorna None
     if not header:
         return None
 
+    # desempacota os 4 bytes do header que contém o tamanho da mensagem
     msgSize = struct.unpack('>I', header)[0]
 
+    # recebe o restante da mensagem, de tamanho msgSize
     return recvall(connectionSocket, msgSize)
 
 # classe para a interface de usuário oferecida
@@ -187,6 +191,14 @@ class GUI:
         except:
             pass
   
+    # função para inserir mensagem na caixa de texto da janela de bate-papo
+    def insertMessage(self, display_msg):
+
+        self.textCons.config(state = NORMAL)
+        self.textCons.insert(END, display_msg)
+        self.textCons.config(state = DISABLED)
+        self.textCons.see(END)
+    
     # A janela de bate-papo
     def layout(self,name):
         
@@ -424,35 +436,47 @@ class GUI:
         if(self.msg[:4] == '/mp '):
 
             try:
+                # recupera o índice, na string, do caracter de espaço seguinte ao nome do usuário
                 next_space = self.msg.index(' ', 5)
             
+            # caso a mensagem contida no comando de mensagem privada seja vazia
             except ValueError:
                 display_msg = f'Mensagem privada não deve ser vazia!\n\n'
                 self.insertMessage(display_msg)
                 return
 
+            # recupera o nome do destinatário da mensagem privada da string do comando
             receiver_name = self.msg[4:next_space]
-            print(f'receiver: "{receiver_name}"')
 
+            # se o destinatário da mensagem privada for o próprio remetente
             if receiver_name == self.name:
+
+                # cria e insere mensagem de erro na janela de bate-papo
                 display_msg = f'Usuário inválido para mensagem privada!\n\n'
                 self.insertMessage(display_msg)
+
                 return
 
+            # se o destinatário for um usuário ativo no bate-papo
             if receiver_name in online_users.values():
 
+                # recupera a mensagem de texto contida no comando de mensagem privada
                 msg = self.msg[next_space+1:]
-                print(f'msg: "{msg}"')
 
+                # caso a mensagem recuperada seja vazia ou seja formada apenas por whitespace
                 if not msg or msg.isspace():
+
+                    # cria e insere mensagem de erro na janela de bate-papo
                     display_msg = f'Mensagem privada não deve ser vazia!\n\n'
                     self.insertMessage(display_msg)
+
                     return
                 
+                # formata e insere a mensagem privada na janela de bate-papo
                 display_msg = f'Você -> {receiver_name}: {msg}\n\n'
-
                 self.insertMessage(display_msg)
 
+                # cria o objeto da mensagem privada, com os campos devidamente preenchidos
                 msg_object = {
                     "type": "chat-message",
                     "private": True,
@@ -461,21 +485,27 @@ class GUI:
                     "message": msg
                 }
 
+                # transforma o objeto da mensagem privada em uma string JSON
                 msg_string = json.dumps(msg_object)
+
+                # envia a mensagem privada para o servidor, para que ele repasse ao destinatário
                 clientSocket.sendall(struct.pack('>I', len(msg_string)) + msg_string.encode(FORMAT))  
 
+            # caso o nome de usuário passado como destinatário não esteja ativo no bate-papo
             else:
 
+                # cria e insere mensagem de erro na janela de bate-papo
                 display_msg = f'Usuário "{receiver_name}" não encontrado.\n\n'
                 self.insertMessage(display_msg)
 
         # trata casos de mensagens públicas (broadcast)
         else:
 
+            # formata e insere a mensagem privada na janela de bate-papo
             display_msg = f'Você: {self.msg}\n\n'
-
             self.insertMessage(display_msg)
 
+            # cria o objeto da mensagem pública, com os campos devidamente preenchidos
             msg_object = {
                 "type": "chat-message",
                 "private": False,
@@ -484,65 +514,69 @@ class GUI:
                 "message": self.msg
             }
 
+            # transforma o objeto da mensagem pública em uma string JSON
             msg_string = json.dumps(msg_object)
+
+            # envia a mensagem pública para o servidor, para que ele a todos os usuários ativos no bate-papo
             clientSocket.sendall(struct.pack('>I', len(msg_string)) + msg_string.encode(FORMAT))  
 
     # trata mensagem de notificação de entrada de usuário no bate-papo
     def handleUserJoined(self, msgObject):
 
+        # recupera o endereço e o nome de usuário do usuário recém conectado do objeto da mensagem
         new_user_address = (msgObject['host'], msgObject['port'])
         new_user_name = msgObject['name']
 
+        # inclui o usuário no dicionário de usuários ativos no bate-papo
         online_users[new_user_address] = new_user_name
 
         print('online_users:', online_users)
 
-        display_msg = f'{new_user_name} se conectou ao bate-papo.\n\n'
-
+        # insere o nome do novo usuário na lista de usuários ativos na direita da janela de bate-papo
         self.listbox.insert(END, ' ' + new_user_name)
 
+        # formata e insere a mensagem de notificação de entrada de usuário na caixa de texto da janela de bate-papo
+        display_msg = f'{new_user_name} se conectou ao bate-papo.\n\n'
         self.insertMessage(display_msg)
-    
-    # função para inserir mensagem na caixa de texto da janela de bate-papo
-    def insertMessage(self, display_msg):
-
-        self.textCons.config(state = NORMAL)
-        self.textCons.insert(END, display_msg)
-        self.textCons.config(state = DISABLED)
-        self.textCons.see(END)
     
     # trata mensagem de notificação de saída de usuário do bate-papo
     def handleUserLeft(self, msgObject):
 
+        # recupera o endereço e o nome de usuário do usuário que saiu do objeto da mensagem
         user_address = (msgObject['host'], msgObject['port'])
         user_name = msgObject['name']
 
+        # exclui o usuário do dicionário de usuários ativos no bate-papo
         del online_users[user_address]
 
         print('online_users:', online_users)
 
-        display_msg = f'{user_name} se desconectou do bate-papo.\n\n'
-
-        print(self.listbox.get(0, END))
-
+        # remove o nome do usuário da lista de usuários ativos na direita da janela de bate-papo
         index = self.listbox.get(0, END).index(' ' + user_name)
         self.listbox.delete(index)
 
+        # formata e insere a mensagem de notificação de saída de usuário na caixa de texto da janela de bate-papo
+        display_msg = f'{user_name} se desconectou do bate-papo.\n\n'
         self.insertMessage(display_msg)
 
     # trata mensagem de bate-papo recebida
     def handleChatMessage(self, msgObject):
 
+        # recupera o nome de usuário e mensagem de bate-papo do objeto da mensagem
         sender = msgObject['sender']
         message = msgObject['message']
 
+        # caso a mensagem recebida seja privada
         if msgObject['private']:
 
+            # formata e insere a mensagem privada a caixa de texto da janela de bate-papo
             display_msg = f'{sender} -> Você: {message}\n\n'
             self.insertMessage(display_msg)
 
+        # caso a mensagem recebida seja pública
         else:
 
+            # formata e insere a mensagem pública a caixa de texto da janela de bate-papo
             display_msg = f'{sender}: {message}\n\n'
             self.insertMessage(display_msg)
 
